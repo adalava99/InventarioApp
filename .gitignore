@@ -1,0 +1,40 @@
+# Build artifacts
+bin/
+obj/
+*.dll
+*.exe
+
+# Logs
+*.log
+logs/
+**/*.log.*
+
+# Visual Studio files
+.vs/
+*.suo
+*.user
+*.userosscache
+*.sln.docstates
+
+# NuGet
+*.nupkg
+packages/
+*.snupkg
+
+# Publish
+Publish/
+
+# Database local files
+*.mdf
+*.ldf
+*.db
+*.dbmdl
+
+# Backup / temp
+*.bak
+*.tmp
+*.orig
+
+# OS files
+.DS_Store
+Thumbs.db
