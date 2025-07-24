@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using Serilog;
 using ServicioTransacciones.Data;
+using ServicioTransacciones.Services;
 using System.Text.Json.Serialization;
 
 Log.Logger = new LoggerConfiguration()
@@ -40,6 +41,8 @@ builder.Services.AddHttpClient("ProductosClient", client =>
 {
     client.BaseAddress = new Uri(builder.Configuration["ExternalServices:ServicioProductos"]!);
 });
+
+builder.Services.AddScoped<TransaccionService>();
 
 var app = builder.Build();
 

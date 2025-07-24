@@ -3,6 +3,7 @@ using Microsoft.EntityFrameworkCore;
 using ServicioTransacciones.Data;
 using ServicioTransacciones.Models;
 using ServicioTransacciones.Models.Dtos;
+using ServicioTransacciones.Services;
 using Swashbuckle.AspNetCore.Annotations;
 
 namespace ServicioTransacciones.Controllers
@@ -11,15 +12,11 @@ namespace ServicioTransacciones.Controllers
     [ApiController]
     public class TransaccionesController : ControllerBase
     {
-        private readonly TransaccionesDbContext dbContext;
-        private readonly ILogger<TransaccionesController> logger;
-        private readonly HttpClient httpClient;
+        private readonly TransaccionService transaccionService;
 
-        public TransaccionesController(TransaccionesDbContext dbContext, ILogger<TransaccionesController> logger, IHttpClientFactory httpClientFactory)
+        public TransaccionesController(TransaccionService transaccionService)
         {
-            this.dbContext = dbContext;
-            this.logger = logger;
-            this.httpClient = httpClientFactory.CreateClient("ProductosClient");
+            this.transaccionService = transaccionService;
         }
 
         [HttpGet]
@@ -30,14 +27,12 @@ namespace ServicioTransacciones.Controllers
         {
             try
             {
-                var transacciones = await dbContext.Transacciones.ToListAsync();
+                var transacciones = await transaccionService.ObtenerTransacciones();
                 return Ok(transacciones);
             }
             catch (Exception ex)
             {
-                logger.LogError(ex, "Error");
                 return StatusCode(500, new { mensaje = "Error interno del servidor" });
-
             }
         }
 
@@ -50,18 +45,15 @@ namespace ServicioTransacciones.Controllers
         {
             try
             {
-                var transaccion = await dbContext.Transacciones.FindAsync(id);
+                var transaccion = await transaccionService.ObtenerTransaccionPorId(id);
                 if (transaccion != null)
-                {
                     return Ok(transaccion);
-                }
+
                 return NotFound(new { mensaje = "Transacción no encontrada" });
             }
             catch (Exception ex)
             {
-                logger.LogError(ex, "Error");
                 return StatusCode(500, new { mensaje = "Error interno del servidor" });
-
             }
 
         }
@@ -75,52 +67,15 @@ namespace ServicioTransacciones.Controllers
         {
             try
             {
-                if (crearTransaccionDto.TipoTransaccion == TipoTransaccion.Venta)
-                {
-                    var stockDisponible = await httpClient.GetFromJsonAsync<StockResponse>(
-                        $"/api/productos/{crearTransaccionDto.ProductoId}/verificarStock?cantidad={crearTransaccionDto.Cantidad}");
-
-                    if (stockDisponible == null || !stockDisponible.Disponible)
-                    {
-                        return BadRequest(new { mensaje = "No hay stock suficiente para esta venta" });
-                    }
-                }
-
-                var precioUnitario = await httpClient.GetFromJsonAsync<double>(
-                    $"/api/productos/{crearTransaccionDto.ProductoId}/obtenerPrecioUnitario");
-
-                var transaccion = new Transaccion
-                {
-                    Fecha = DateTime.Now,
-                    TipoTransaccion = crearTransaccionDto.TipoTransaccion.ToString(),
-                    ProductoId = crearTransaccionDto.ProductoId,
-                    Cantidad = crearTransaccionDto.Cantidad,
-                    PrecioUnitario = precioUnitario,
-                    Detalle = crearTransaccionDto.Detalle,
-                    PrecioTotal = crearTransaccionDto.Cantidad * precioUnitario
-                };
-
-                dbContext.Transacciones.Add(transaccion);
-                await dbContext.SaveChangesAsync();
-
-                var ajuste = new AjusteStockDto
-                {
-                    ProductoId = transaccion.ProductoId,
-                    Cantidad = transaccion.TipoTransaccion == TipoTransaccion.Venta.ToString()
-                    ? -transaccion.Cantidad: transaccion.Cantidad
-                };
-
-                await httpClient.PutAsync(
-                    $"/api/productos/ajustarStock", JsonContent.Create(ajuste));
-
+                var transaccion = await transaccionService.CrearTransaccion(crearTransaccionDto);
+                if (transaccion == null)
+                    return BadRequest(new { mensaje = "No hay stock suficiente para esta venta" });
 
                 return CreatedAtAction(nameof(GetTransaccionesById), new { id = transaccion.Id }, transaccion);
             }
             catch (Exception ex)
             {
-                logger.LogError(ex, "Error");
                 return StatusCode(500, new { mensaje = "Error interno del servidor" });
-
             }
 
         }
@@ -135,26 +90,15 @@ namespace ServicioTransacciones.Controllers
         {
             try
             {
-                var transaccion = await dbContext.Transacciones.FindAsync(id);
-
-                if (transaccion == null) return NotFound(new { mensaje = "Transacción no encontrada" });
-
-                transaccion.Fecha = editarTransaccionDto.Fecha;
-                transaccion.TipoTransaccion = editarTransaccionDto.TipoTransaccion.ToString();
-                transaccion.Cantidad = editarTransaccionDto.Cantidad;
-                transaccion.PrecioTotal = transaccion.PrecioUnitario * editarTransaccionDto.Cantidad;
-                transaccion.Detalle = editarTransaccionDto.Detalle;
-                transaccion.UpdatedAt = DateTime.Now;
-
-                await dbContext.SaveChangesAsync();
+                var transaccion = await transaccionService.EditarTransaccion(id, editarTransaccionDto);
+                if (transaccion == null)
+                    return NotFound(new { mensaje = "Transacción no encontrada" });
 
                 return Ok(transaccion);
             }
             catch (Exception ex)
             {
-                logger.LogError(ex, "Error");
                 return StatusCode(500, new { mensaje = "Error interno del servidor" });
-
             }
 
         }
@@ -168,18 +112,15 @@ namespace ServicioTransacciones.Controllers
         {
             try
             {
-                var transaccion = await dbContext.Transacciones.FindAsync(id);
-                if (transaccion is null) return NotFound(new { mensaje = "Transacción no encontrada" });
+                var eliminado = await transaccionService.EliminarTransaccion(id);
+                if (!eliminado)
+                    return NotFound(new { mensaje = "Transacción no encontrada" });
 
-                dbContext.Transacciones.Remove(transaccion);
-                await dbContext.SaveChangesAsync();
                 return Ok(new { mensaje = "Transacción eliminada" });
             }
             catch (Exception ex)
             {
-                logger.LogError(ex, "Error");
                 return StatusCode(500, new { mensaje = "Error interno del servidor" });
-
             }
         }
 
@@ -192,59 +133,14 @@ namespace ServicioTransacciones.Controllers
         {
             try
             {
-                var query = dbContext.Transacciones.AsQueryable();
-
-                if (filtro.FechaInicio.HasValue)
-                    query = query.Where(t => t.Fecha >= filtro.FechaInicio);
-
-                if (filtro.FechaFin.HasValue)
-                    query = query.Where(t => t.Fecha <= filtro.FechaFin);
-
-                if (filtro.TipoTransaccion.HasValue)
-                    query = query.Where(t => t.TipoTransaccion == filtro.TipoTransaccion.ToString());
-
-                var transacciones = await query.ToListAsync();
-
-                var productoIds = transacciones.Select(t => t.ProductoId).Distinct().ToList();
-
-                var response = await httpClient.PostAsJsonAsync($"/api/productos/resumenMasivo", productoIds);
-                if (!response.IsSuccessStatusCode)
+                var historial = await transaccionService.ObtenerHistorial(filtro);
+                if (historial == null)
                     return StatusCode(500, new { mensaje = "Error al obtener datos de productos" });
-
-                var productosResumen = await response.Content.ReadFromJsonAsync<List<ProductoResumenDto>>();
-
-                var mapProductos = productosResumen.ToDictionary(p => p.ProductoId);
-
-                var historial = productoIds.Select(id =>
-                {
-                    var transaccionesProducto = transacciones
-                        .Where(t => t.ProductoId == id)
-                        .Select(t => new TransaccionHistorialDto
-                        {
-                            Fecha = t.Fecha,
-                            TipoTransaccion = t.TipoTransaccion,
-                            Cantidad = t.Cantidad,
-                            PrecioUnitario = t.PrecioUnitario,
-                            PrecioTotal = t.PrecioTotal,
-                            Detalle = t.Detalle
-                        }).ToList();
-
-                    var resumen = mapProductos[id];
-
-                    return new ProductoHistorialDto
-                    {
-                        ProductoId = id,
-                        Nombre = resumen.Nombre,
-                        Stock = resumen.Stock,
-                        Transacciones = transaccionesProducto
-                    };
-                }).ToList();
 
                 return Ok(historial);
             }
             catch (Exception ex)
             {
-                logger.LogError(ex, "Error al obtener historial");
                 return StatusCode(500, new { mensaje = "Error interno del servidor" });
             }
         }
