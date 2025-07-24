@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using Serilog;
 using ServicioProductos.Data;
+using ServicioProductos.Services;
 using System.Text.Json.Serialization;
 
 Log.Logger = new LoggerConfiguration()
@@ -30,6 +31,8 @@ builder.Services.AddSwaggerGen(configuration =>
 });
 builder.Services.AddDbContext<ProductosDbContext>(options =>
 options.UseSqlServer(builder.Configuration.GetConnectionString("DefaultConnection")));
+
+builder.Services.AddScoped <ProductoService>();
 
 builder.Host.UseSerilog();
 

@@ -1,9 +1,7 @@
-﻿using Microsoft.AspNetCore.Http.HttpResults;
-using Microsoft.AspNetCore.Mvc;
-using Microsoft.EntityFrameworkCore;
-using ServicioProductos.Data;
+﻿using Microsoft.AspNetCore.Mvc;
 using ServicioProductos.Models;
 using ServicioProductos.Models.Dtos;
+using ServicioProductos.Services;
 using Swashbuckle.AspNetCore.Annotations;
 
 namespace ServicioProductos.Controllers
@@ -12,12 +10,11 @@ namespace ServicioProductos.Controllers
     [ApiController]
     public class ProductosController : ControllerBase
     {
-        private readonly ProductosDbContext dbContext;
-        private readonly ILogger<ProductosController> logger;
-        public ProductosController(ProductosDbContext dbContext, ILogger<ProductosController> logger)
+        private readonly ProductoService productoService;
+        public ProductosController(ProductoService productoService)
         {
-            this.dbContext = dbContext;
-            this.logger = logger;
+
+            this.productoService = productoService;
         }
 
         [HttpGet]
@@ -28,12 +25,11 @@ namespace ServicioProductos.Controllers
         {
             try
             {
-                var productos = await dbContext.Productos.ToListAsync();
+                var productos = await productoService.GetProductos();
                 return Ok(productos);
             }
             catch (Exception ex)
             {
-                logger.LogError(ex, "Error");
                 return StatusCode(500, new { mensaje = "Error interno del servidor" });
 
             }
@@ -48,7 +44,7 @@ namespace ServicioProductos.Controllers
         {
             try
             {
-                var producto = await dbContext.Productos.FindAsync(id);
+                var producto = await productoService.GetProductosById(id);
                 if (producto != null)
                 {
                     return Ok(producto);
@@ -57,9 +53,7 @@ namespace ServicioProductos.Controllers
             }
             catch (Exception ex)
             {
-                logger.LogError(ex, "Error");
                 return StatusCode(500, new { mensaje = "Error interno del servidor" });
-
             }
 
         }
@@ -71,39 +65,14 @@ namespace ServicioProductos.Controllers
         [SwaggerResponse(500, "Error interno del servidor")]
         public async Task<IActionResult> CrearProducto(ProductoDto crearProductoDto)
         {
-            try {
-                var producto = new Producto
-                {
-                    Nombre = crearProductoDto.Nombre,
-                    Descripcion = crearProductoDto.Descripcion,
-                    Categoria = crearProductoDto.Categoria,
-                    Imagen = crearProductoDto.Imagen,
-                    Precio = crearProductoDto.Precio,
-                    Stock = crearProductoDto.Stock,
-                    CreatedAt = DateTime.Now
-                };
-
-                dbContext.Productos.Add(producto);
-                await dbContext.SaveChangesAsync();
-
-                var responseDto = new ProductoResponseDto
-                {
-                    Id = producto.Id,
-                    Nombre = producto.Nombre,
-                    Descripcion = producto.Descripcion,
-                    Categoria = producto.Categoria,
-                    Imagen = producto.Imagen,
-                    Precio = producto.Precio,
-                    Stock = producto.Stock
-                };
-
-                return CreatedAtAction(nameof(GetProductosById), new { id = producto.Id }, producto);
+            try
+            {
+                var productoCreado = await productoService.CrearProducto(crearProductoDto);
+                return CreatedAtAction(nameof(GetProductosById), new { id = productoCreado.Id }, productoCreado);
             }
             catch (Exception ex)
             {
-                logger.LogError(ex, "Error");
                 return StatusCode(500, new { mensaje = "Error interno del servidor" });
-
             }
 
         }
@@ -114,30 +83,20 @@ namespace ServicioProductos.Controllers
         [SwaggerResponse(404, "Producto no encontrado")]
         [SwaggerResponse(400, "Datos inválidos en la solicitud")]
         [SwaggerResponse(500, "Error interno del servidor")]
-        public async Task<IActionResult> ActualizarProducto(long id, ProductoDto actualizarProductoDto)
+        public async Task<IActionResult> ActualizarProducto(long id, [FromBody] ProductoDto actualizarProductoDto)
         {
-            try {
-                var producto = await dbContext.Productos.FindAsync(id);
-                if (producto == null) return NotFound(new { mensaje = "Producto no encontrado" });
+            try
+            {
+                var productoActualizado = await productoService.ActualizarProducto(id, actualizarProductoDto);
+                if (productoActualizado == null)
+                    return NotFound(new { mensaje = "Producto no encontrado" });
 
-                producto.Nombre = actualizarProductoDto.Nombre;
-                producto.Descripcion = actualizarProductoDto.Descripcion;
-                producto.Precio = actualizarProductoDto.Precio;
-                producto.Categoria = actualizarProductoDto.Categoria;
-                producto.Imagen = actualizarProductoDto.Imagen;
-                producto.Stock = actualizarProductoDto.Stock;
-                producto.UpdatedAt = DateTime.Now;
-
-                await dbContext.SaveChangesAsync();
-                return Ok(producto);
+                return Ok(productoActualizado);
             }
             catch (Exception ex)
             {
-                logger.LogError(ex, "Error");
                 return StatusCode(500, new { mensaje = "Error interno del servidor" });
-
             }
-
         }
 
         [HttpDelete("{id}")]
@@ -147,19 +106,17 @@ namespace ServicioProductos.Controllers
         [SwaggerResponse(500, "Error interno del servidor")]
         public async Task<IActionResult> EliminarProducto(long id)
         {
-            try {
-                var producto = await dbContext.Productos.FindAsync(id);
-                if (producto is null) return NotFound(new { mensaje = "Producto no encontrado" });
+            try
+            {
+                var eliminado = await productoService.EliminarProducto(id);
+                if (!eliminado)
+                    return NotFound(new { mensaje = "Producto no encontrado" });
 
-                dbContext.Productos.Remove(producto);
-                await dbContext.SaveChangesAsync();
                 return Ok(new { mensaje = "Producto eliminado" });
             }
             catch (Exception ex)
             {
-                logger.LogError(ex, "Error");
                 return StatusCode(500, new { mensaje = "Error interno del servidor" });
-
             }
         }
 
@@ -171,34 +128,15 @@ namespace ServicioProductos.Controllers
         {
             try
             {
-                var query = dbContext.Productos.AsQueryable();
-
-                if (!string.IsNullOrEmpty(filtro.Nombre))
-                    query = query.Where(p => p.Nombre.Contains(filtro.Nombre));
-
-                if (!string.IsNullOrEmpty(filtro.Categoria))
-                    query = query.Where(p => p.Categoria.Contains(filtro.Categoria));
-
-                if (filtro.OrdenarPor.HasValue)
-                {
-                    bool asc = filtro.DireccionOrden != DireccionOrden.desc;
-                    query = filtro.OrdenarPor switch
-                    {
-                        CampoOrden.precio => asc ? query.OrderBy(p => p.Precio) : query.OrderByDescending(p => p.Precio),
-                        CampoOrden.stock => asc ? query.OrderBy(p => p.Stock) : query.OrderByDescending(p => p.Stock),
-                        _ => query
-                    };
-                }
-
-                var productos = await query.ToListAsync();
+                var productos = await productoService.FiltrarProductos(filtro);
                 return Ok(productos);
             }
             catch (Exception ex)
             {
-                logger.LogError(ex, "Error");
                 return StatusCode(500, new { mensaje = "Error interno del servidor" });
             }
         }
+
 
         [HttpGet("{id}/verificarStock")]
         [SwaggerOperation("Verifica stock para ventas", "Devuelve si hay stock suficiente para realizar una venta")]
@@ -207,19 +145,16 @@ namespace ServicioProductos.Controllers
         [SwaggerResponse(500, "Error interno del servidor")]
         public async Task<IActionResult> VerificarStock(long id, [FromQuery] int cantidad)
         {
-            try {
-                var producto = await dbContext.Productos.FindAsync(id);
-                if (producto == null)
+            try
+            {
+                var disponible = await productoService.VerificarStock(id, cantidad);
+                if (disponible == null)
                     return NotFound(new { mensaje = "Producto no encontrado" });
 
-                if (producto.Stock >= cantidad)
-                    return Ok(new { disponible = true });
-
-                return Ok(new { disponible = false });
+                return Ok(new { disponible });
             }
             catch (Exception ex)
             {
-                logger.LogError(ex, "Error");
                 return StatusCode(500, new { mensaje = "Error interno del servidor" });
             }
 
@@ -232,17 +167,18 @@ namespace ServicioProductos.Controllers
         [SwaggerResponse(500, "Error interno del servidor")]
         public async Task<IActionResult> ObtenerPrecioUnitario(long id)
         {
-            try {
-                var producto = await dbContext.Productos.FindAsync(id);
-                if (producto == null) return NotFound(new { mensaje = "Producto no encontrado" });
+    try
+    {
+        var precio = await productoService.ObtenerPrecioUnitario(id);
+        if (precio == null)
+            return NotFound(new { mensaje = "Producto no encontrado" });
 
-                return Ok(producto.Precio);
-            }
-            catch (Exception ex)
-            {
-                logger.LogError(ex, "Error");
-                return StatusCode(500, new { mensaje = "Error interno del servidor" });
-            }
+        return Ok(precio);
+    }
+    catch (Exception ex)
+    {
+        return StatusCode(500, new { mensaje = "Error interno del servidor" });
+    }
         }
 
         [HttpPut("ajustarStock")]
@@ -255,21 +191,15 @@ namespace ServicioProductos.Controllers
         {
             try
             {
-                var producto = await dbContext.Productos.FindAsync(dto.ProductoId);
-                if (producto == null)
-                    return NotFound(new { mensaje = "Producto no encontrado" });
+                var (exito, stockActual) = await productoService.AjustarStock(dto);
 
-                producto.Stock += dto.Cantidad;
+                if (!exito)
+                    return BadRequest(new { mensaje = "Producto no encontrado" });
 
-                if (producto.Stock < 0)
-                    return BadRequest(new { mensaje = "El stock no puede ser negativo" });
-
-                await dbContext.SaveChangesAsync();
-                return Ok(new { mensaje = "Stock actualizado correctamente", stockActual = producto.Stock });
+                return Ok(new { mensaje = "Stock actualizado correctamente", stockActual });
             }
             catch (Exception ex)
             {
-                logger.LogError(ex, "Error");
                 return StatusCode(500, new { mensaje = "Error interno del servidor" });
             }
         }
@@ -282,21 +212,11 @@ namespace ServicioProductos.Controllers
         {
             try
             {
-                var productos = await dbContext.Productos
-                .Where(p => ids.Contains(p.Id))
-                .Select(p => new
-                {
-                    ProductoId = p.Id,
-                    Nombre = p.Nombre,
-                    Stock = p.Stock
-                })
-                .ToListAsync();
-
-                return Ok(productos);
+                var resumen = await productoService.ObtenerResumenMasivo(ids);
+                return Ok(resumen);
             }
             catch (Exception ex)
             {
-                logger.LogError(ex, "Error");
                 return StatusCode(500, new { mensaje = "Error interno del servidor" });
             }
 
